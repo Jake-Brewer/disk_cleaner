@@ -356,3 +356,114 @@ performance:
         config_manager = ConfigurationManager(validator=FailingValidator())
         with pytest.raises(ValueError, match="Custom validation error"):
             config_manager.get_default_configuration()
+
+    @pytest.mark.unit
+    def test_configuration_persistence(self):
+        """Test that configuration can be saved to disk."""
+        from disk_cleaner.src.disk_cleaner.config import ConfigurationManager
+        import tempfile
+        from pathlib import Path
+
+        config_manager = ConfigurationManager()
+        config = config_manager.get_default_configuration()
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            temp_path = Path(f.name)
+
+        try:
+            # This should work if save functionality is implemented
+            result = config_manager.save_configuration(config, temp_path)
+            assert result is True
+
+            # Verify file was written
+            assert temp_path.exists()
+            content = temp_path.read_text()
+            assert len(content) > 0
+            assert 'scan:' in content
+            assert 'performance:' in content
+        except AttributeError:
+            # If method doesn't exist yet, this test will fail (RED phase)
+            pytest.fail("ConfigurationManager.save_configuration method not implemented")
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    @pytest.mark.unit
+    def test_configuration_persistence_atomicity(self):
+        """Test that configuration saving is atomic."""
+        from disk_cleaner.src.disk_cleaner.config import ConfigurationManager
+        import tempfile
+        from pathlib import Path
+
+        config_manager = ConfigurationManager()
+        config = config_manager.get_default_configuration()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+
+            # Create initial config file
+            initial_config = {"test": "initial"}
+            import yaml
+            config_path.write_text(yaml.dump(initial_config))
+
+            # Try to save new config (should be atomic)
+            result = config_manager.save_configuration(config, config_path)
+            assert result is True
+
+            # Verify the file contains new config, not corrupted mix
+            saved_content = config_path.read_text()
+            saved_config = yaml.safe_load(saved_content)
+            assert 'scan' in saved_config
+            assert 'performance' in saved_config
+            assert 'test' not in saved_config  # Old content should be gone
+
+    @pytest.mark.unit
+    def test_configuration_backup_creation(self):
+        """Test that backups are created when saving configuration."""
+        from disk_cleaner.src.disk_cleaner.config import ConfigurationManager
+        import tempfile
+        from pathlib import Path
+
+        config_manager = ConfigurationManager()
+        config = config_manager.get_default_configuration()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.yaml"
+
+            # Create initial config file
+            initial_content = "initial: content"
+            config_path.write_text(initial_content)
+
+            # Save new configuration
+            result = config_manager.save_configuration(config, config_path)
+            assert result is True
+
+            # Check for backup file
+            backup_files = list(config_path.parent.glob(f"{config_path.stem}.backup.*{config_path.suffix}"))
+            assert len(backup_files) > 0
+
+            # Verify backup contains original content
+            backup_content = backup_files[0].read_text()
+            assert "initial: content" in backup_content
+
+    @pytest.mark.unit
+    def test_configuration_save_error_handling(self):
+        """Test that configuration save handles errors gracefully."""
+        from disk_cleaner.src.disk_cleaner.config import ConfigurationManager
+        import tempfile
+        from pathlib import Path
+        import os
+
+        config_manager = ConfigurationManager()
+        config = config_manager.get_default_configuration()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create a path in a non-existent directory
+            invalid_path = Path(temp_dir) / "nonexistent" / "config.yaml"
+
+            # This should handle the error gracefully
+            result = config_manager.save_configuration(config, invalid_path)
+            assert result is False  # Should return False on failure
+
+            # File should not exist
+            assert not invalid_path.exists()
