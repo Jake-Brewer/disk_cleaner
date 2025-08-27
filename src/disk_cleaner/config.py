@@ -145,3 +145,34 @@ class ConfigurationManager:
                         config_paths.append(config_path)
 
         return config_paths
+
+    def _read_config_file(self, config_path: Path) -> Dict[str, Any]:
+        """Read and parse a configuration file.
+
+        Args:
+            config_path: Path to the configuration file
+
+        Returns:
+            Dictionary containing parsed configuration
+
+        Raises:
+            ValueError: If file cannot be read or parsed
+        """
+        import yaml
+        import json
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            if config_path.suffix.lower() in ['.yaml', '.yml']:
+                return yaml.safe_load(content)
+            elif config_path.suffix.lower() == '.json':
+                return json.loads(content)
+            else:
+                raise ValueError(f"Unsupported configuration file format: {config_path.suffix}")
+
+        except (IOError, OSError) as e:
+            raise ValueError(f"Cannot read configuration file {config_path}: {e}")
+        except (yaml.YAMLError, json.JSONDecodeError) as e:
+            raise ValueError(f"Cannot parse configuration file {config_path}: {e}")
