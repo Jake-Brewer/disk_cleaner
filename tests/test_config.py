@@ -141,3 +141,134 @@ performance:
             assert '%USERPROFILE%' not in str(path)
             # Should contain actual expanded path
             assert 'Users' in path or os.path.exists(path)
+
+    @pytest.mark.unit
+    def test_yaml_configuration_parsing(self):
+        """Test that YAML configuration files can be parsed correctly."""
+        from disk_cleaner.src.disk_cleaner.config import ConfigurationManager
+        import tempfile
+        from pathlib import Path
+
+        config_manager = ConfigurationManager()
+
+        # Test valid YAML parsing
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write("""
+scan:
+  paths:
+    - C:\\Test\\Path
+    - D:\\Another\\Path
+  max_depth: 5
+performance:
+  mode: background
+  max_threads: 8
+""")
+            temp_path = Path(f.name)
+
+        try:
+            config_data = config_manager._read_config_file(temp_path)
+            assert isinstance(config_data, dict)
+            assert 'scan' in config_data
+            assert 'performance' in config_data
+            assert config_data['scan']['max_depth'] == 5
+            assert config_data['performance']['mode'] == 'background'
+            assert len(config_data['scan']['paths']) == 2
+        finally:
+            temp_path.unlink()
+
+    @pytest.mark.unit
+    def test_malformed_yaml_handling(self):
+        """Test that malformed YAML files are handled gracefully."""
+        from disk_cleaner.src.disk_cleaner.config import ConfigurationManager
+        import tempfile
+        from pathlib import Path
+
+        config_manager = ConfigurationManager()
+
+        # Test malformed YAML
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write("""
+scan:
+  paths:
+    - C:\\Test\\Path
+  invalid_yaml: [missing closing bracket
+performance:
+  mode: background
+""")
+            temp_path = Path(f.name)
+
+        try:
+            with pytest.raises(ValueError, match="Cannot parse configuration file"):
+                config_manager._read_config_file(temp_path)
+        finally:
+            temp_path.unlink()
+
+    @pytest.mark.unit
+    def test_yaml_anchors_and_references(self):
+        """Test that YAML anchors and references are supported."""
+        from disk_cleaner.src.disk_cleaner.config import ConfigurationManager
+        import tempfile
+        from pathlib import Path
+
+        config_manager = ConfigurationManager()
+
+        # Test YAML with anchors and references
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write("""
+defaults: &defaults
+  max_depth: 10
+  follow_symlinks: false
+
+scan:
+  <<: *defaults
+  paths:
+    - C:\\Test\\Path
+performance:
+  <<: *defaults
+  mode: background
+  max_threads: 4
+""")
+            temp_path = Path(f.name)
+
+        try:
+            config_data = config_manager._read_config_file(temp_path)
+            assert config_data['scan']['max_depth'] == 10
+            assert config_data['scan']['follow_symlinks'] is False
+            assert config_data['performance']['max_depth'] == 10
+            assert config_data['performance']['follow_symlinks'] is False
+            assert config_data['performance']['mode'] == 'background'
+        finally:
+            temp_path.unlink()
+
+    @pytest.mark.unit
+    def test_json_configuration_parsing(self):
+        """Test that JSON configuration files can be parsed correctly."""
+        from disk_cleaner.src.disk_cleaner.config import ConfigurationManager
+        import tempfile
+        from pathlib import Path
+        import json
+
+        config_manager = ConfigurationManager()
+
+        # Test JSON parsing
+        config_dict = {
+            'scan': {
+                'paths': ['C:\\Test\\Path'],
+                'max_depth': 5
+            },
+            'performance': {
+                'mode': 'background',
+                'max_threads': 8
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config_dict, f)
+            temp_path = Path(f.name)
+
+        try:
+            config_data = config_manager._read_config_file(temp_path)
+            assert isinstance(config_data, dict)
+            assert config_data == config_dict
+        finally:
+            temp_path.unlink()
