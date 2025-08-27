@@ -1,0 +1,50 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+dist/
+build/
+.eggs/
+*.egg-info/
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.sublime*
+
+# Logs and temp files
+*.log
+temp/
+
+# Node modules
+node_modules/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Poetry
+poetry.lock
