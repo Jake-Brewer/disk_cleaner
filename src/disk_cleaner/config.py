@@ -114,7 +114,54 @@ class ConfigurationManager:
         self._config_source = config_source or DefaultConfigurationSource()
         self._validator = validator or BasicConfigurationValidator()
 
-    def _discover_config_files(self) -> List[Path]:
+    def get_default_configuration(self) -> Dict[str, Any]:
+        """Generate default configuration for the disk cleaner.
+
+        Returns:
+            Dictionary containing default configuration values
+        """
+        config = self._config_source.load()
+        self._validator.validate(config)
+        return config
+
+    def save_configuration(self, config: Dict[str, Any], config_path: Path) -> bool:
+        """Save configuration to disk with atomic writes and backup creation.
+
+        Args:
+            config: Configuration dictionary to save
+            config_path: Path where to save the configuration
+
+        Returns:
+            True if successful, False if failed
+        """
+        try:
+            # Validate configuration before saving
+            self._validator.validate(config)
+
+            # Create backup if file exists
+            if config_path.exists():
+                backup_path = config_path.with_suffix(f'.backup.{int(datetime.now().timestamp())}{config_path.suffix}')
+                shutil.copy2(config_path, backup_path)
+
+            # Ensure parent directory exists
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write to temporary file first (atomic write)
+            with tempfile.NamedTemporaryFile(mode='w', suffix=config_path.suffix, delete=False, dir=config_path.parent) as temp_file:
+                yaml.dump(config, temp_file, default_flow_style=False, sort_keys=False)
+                temp_path = Path(temp_file.name)
+
+            # Atomic move to final location
+            temp_path.replace(config_path)
+            return True
+
+        except Exception:
+            # Cleanup temp file if it exists
+            if 'temp_path' in locals() and temp_path.exists():
+                temp_path.unlink()
+            return False
+
+    def _discover_config_files(self) -> list[Path]:
         """Discover configuration files in standard locations.
 
         Returns:
