@@ -114,12 +114,34 @@ class ConfigurationManager:
         self._config_source = config_source or DefaultConfigurationSource()
         self._validator = validator or BasicConfigurationValidator()
 
-    def get_default_configuration(self) -> Dict[str, Any]:
-        """Generate default configuration for the disk cleaner.
+    def _discover_config_files(self) -> List[Path]:
+        """Discover configuration files in standard locations.
 
         Returns:
-            Dictionary containing default configuration values
+            List of paths to potential configuration files
         """
-        config = self._config_source.load()
-        self._validator.validate(config)
-        return config
+        from pathlib import Path
+        import os
+
+        config_paths = []
+
+        # Standard locations for configuration files
+        search_locations = [
+            os.path.expandvars(r'%APPDATA%\disk_cleaner'),
+            os.path.expandvars(r'%LOCALAPPDATA%\disk_cleaner'),
+            Path.cwd(),  # Current working directory
+            Path.home() / '.disk_cleaner'  # Home directory
+        ]
+
+        # Possible configuration file names
+        config_names = ['config.yaml', 'config.yml', 'config.json']
+
+        for location in search_locations:
+            location_path = Path(location)
+            if location_path.exists():
+                for config_name in config_names:
+                    config_path = location_path / config_name
+                    if config_path.exists():
+                        config_paths.append(config_path)
+
+        return config_paths
