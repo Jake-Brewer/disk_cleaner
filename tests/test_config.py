@@ -266,9 +266,93 @@ performance:
             json.dump(config_dict, f)
             temp_path = Path(f.name)
 
-        try:
             config_data = config_manager._read_config_file(temp_path)
             assert isinstance(config_data, dict)
             assert config_data == config_dict
         finally:
             temp_path.unlink()
+
+    @pytest.mark.unit
+    def test_configuration_schema_validation(self):
+        """Test that configuration schema validation works correctly."""
+        from disk_cleaner.src.disk_cleaner.config import ConfigurationManager, BasicConfigurationValidator
+        import pytest
+
+        validator = BasicConfigurationValidator()
+        config_manager = ConfigurationManager()
+
+        # Test valid configuration
+        valid_config = config_manager.get_default_configuration()
+        validator.validate(valid_config)  # Should not raise
+
+        # Test missing required section
+        invalid_config = valid_config.copy()
+        del invalid_config['scan']
+        with pytest.raises(ValueError, match="Missing required configuration section: scan"):
+            validator.validate(invalid_config)
+
+        # Test invalid section type
+        invalid_config = valid_config.copy()
+        invalid_config['scan'] = "invalid_string_instead_of_dict"
+        with pytest.raises(ValueError, match="Configuration section 'scan' must be a dictionary"):
+            validator.validate(invalid_config)
+
+    @pytest.mark.unit
+    def test_performance_settings_validation(self):
+        """Test that performance settings are validated correctly."""
+        from disk_cleaner.src.disk_cleaner.config import BasicConfigurationValidator
+        import pytest
+
+        validator = BasicConfigurationValidator()
+
+        # Test valid performance settings
+        valid_config = {
+            'scan': {'paths': []},
+            'performance': {
+                'mode': 'background',
+                'max_threads': 8,
+                'memory_limit_mb': 1024,
+                'cpu_limit_percent': 80
+            },
+            'classification': {'temp_file_age_days': 30},
+            'ui': {'theme': 'auto'}
+        }
+        validator.validate(valid_config)  # Should not raise
+
+        # Test invalid max_threads
+        invalid_config = valid_config.copy()
+        invalid_config['performance']['max_threads'] = 20  # Too high
+        with pytest.raises(ValueError, match="max_threads must be an integer between 1 and 16"):
+            validator.validate(invalid_config)
+
+        invalid_config['performance']['max_threads'] = 0  # Too low
+        with pytest.raises(ValueError, match="max_threads must be an integer between 1 and 16"):
+            validator.validate(invalid_config)
+
+        # Test invalid memory_limit_mb
+        invalid_config = valid_config.copy()
+        invalid_config['performance']['max_threads'] = 8  # Reset to valid
+        invalid_config['performance']['memory_limit_mb'] = 0  # Invalid
+        with pytest.raises(ValueError, match="memory_limit_mb must be a positive integer"):
+            validator.validate(invalid_config)
+
+    @pytest.mark.unit
+    def test_configuration_manager_integration(self):
+        """Test that ConfigurationManager integrates validation correctly."""
+        from disk_cleaner.src.disk_cleaner.config import ConfigurationManager, BasicConfigurationValidator
+        import pytest
+
+        # Test with valid validator
+        config_manager = ConfigurationManager()
+        config = config_manager.get_default_configuration()
+        assert isinstance(config, dict)
+        assert 'scan' in config
+
+        # Test with custom validator that always fails
+        class FailingValidator(BasicConfigurationValidator):
+            def validate(self, config):
+                raise ValueError("Custom validation error")
+
+        config_manager = ConfigurationManager(validator=FailingValidator())
+        with pytest.raises(ValueError, match="Custom validation error"):
+            config_manager.get_default_configuration()
