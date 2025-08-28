@@ -350,7 +350,230 @@ class TestFileSystemScanner:
                 assert "hardlink.txt" in file_names
 
             except OSError:
-                # Hardlinks not supported or failed
                 files = list(scanner._scan_directory(temp_path, max_depth=5))
                 file_names = [f.path.name for f in files if f.path.name.endswith('.txt')]
                 assert "regular.txt" in file_names
+
+    @pytest.mark.unit
+    def test_glob_pattern_exclusion(self):
+        """Test exclusion of files and directories using glob patterns."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner, ScanConfig
+        import tempfile
+        from pathlib import Path
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test directory structure
+            (temp_path / "keep.txt").write_text("keep")
+            (temp_path / "exclude.txt").write_text("exclude")
+            (temp_path / "important.doc").write_text("important")
+
+            # Create subdirectory with files
+            subdir = temp_path / "cache"
+            subdir.mkdir()
+            (subdir / "temp.dat").write_text("temp")
+            (subdir / "cache.tmp").write_text("cache")
+
+            # Test glob pattern exclusion
+            config = ScanConfig(
+                max_depth=5,
+                exclude_patterns=["*.tmp", "*.dat", "cache/**"]
+            )
+
+            files = list(scanner._scan_directory_with_config(temp_path, config))
+
+            # Verify excluded files are not present
+            file_names = [f.path.name for f in files]
+            assert "exclude.txt" not in file_names  # Should be excluded by pattern
+            assert "temp.dat" not in file_names     # Should be excluded
+            assert "cache.tmp" not in file_names    # Should be excluded
+            assert "keep.txt" in file_names         # Should be kept
+            assert "important.doc" in file_names    # Should be kept
+
+    @pytest.mark.unit
+    def test_size_based_filtering(self):
+        """Test filtering files based on size thresholds."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner, ScanConfig
+        import tempfile
+        from pathlib import Path
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create files of different sizes
+            small_file = temp_path / "small.txt"
+            small_file.write_text("small")  # ~5 bytes
+
+            large_file = temp_path / "large.txt"
+            large_content = "x" * 2000  # ~2000 bytes
+            large_file.write_text(large_content)
+
+            # Test size-based filtering (exclude files smaller than 100 bytes)
+            config = ScanConfig(
+                max_depth=5,
+                min_file_size_bytes=100
+            )
+
+            files = list(scanner._scan_directory_with_config(temp_path, config))
+
+            # Verify only large file is included
+            file_names = [f.path.name for f in files]
+            assert "large.txt" in file_names
+            assert "small.txt" not in file_names  # Should be filtered out
+
+    @pytest.mark.unit
+    def test_file_extension_filtering(self):
+        """Test filtering files based on extensions."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner, ScanConfig
+        import tempfile
+        from pathlib import Path
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create files with different extensions
+            (temp_path / "document.txt").write_text("text")
+            (temp_path / "spreadsheet.xlsx").write_text("excel")
+            (temp_path / "presentation.pptx").write_text("powerpoint")
+            (temp_path / "executable.exe").write_text("binary")
+            (temp_path / "archive.zip").write_text("archive")
+
+            # Test extension-based filtering
+            config = ScanConfig(
+                max_depth=5,
+                exclude_extensions=[".exe", ".zip"]
+            )
+
+            files = list(scanner._scan_directory_with_config(temp_path, config))
+
+            # Verify excluded extensions are not present
+            file_names = [f.path.name for f in files]
+            assert "document.txt" in file_names
+            assert "spreadsheet.xlsx" in file_names
+            assert "presentation.pptx" in file_names
+            assert "executable.exe" not in file_names  # Should be excluded
+            assert "archive.zip" not in file_names     # Should be excluded
+
+    @pytest.mark.unit
+    def test_path_based_exclusion(self):
+        """Test exclusion based on specific paths and directories."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner, ScanConfig
+        import tempfile
+        from pathlib import Path
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create directory structure
+            (temp_path / "keep.txt").write_text("keep")
+
+            temp_dir = temp_path / "temp"
+            temp_dir.mkdir()
+            (temp_dir / "tempfile.txt").write_text("temp")
+
+            cache_dir = temp_path / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "cached.dat").write_text("cache")
+
+            # Test path-based exclusion
+            config = ScanConfig(
+                max_depth=5,
+                exclude_patterns=["temp/**", "cache/**"]
+            )
+
+            files = list(scanner._scan_directory_with_config(temp_path, config))
+
+            # Verify excluded paths are not present
+            file_paths = [str(f.path) for f in files]
+            assert any("keep.txt" in path for path in file_paths)
+            assert not any("tempfile.txt" in path for path in file_paths)
+            assert not any("cached.dat" in path for path in file_paths)
+
+    @pytest.mark.unit
+    def test_combined_exclusion_rules(self):
+        """Test that multiple exclusion rules work together."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner, ScanConfig
+        import tempfile
+        from pathlib import Path
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create mixed file structure
+            (temp_path / "keep.txt").write_text("keep")
+            (temp_path / "temp.log").write_text("x" * 50)  # Small file
+            (temp_path / "large.tmp").write_text("x" * 2000)  # Large temp file
+
+            temp_dir = temp_path / "temp"
+            temp_dir.mkdir()
+            (temp_dir / "nested.exe").write_text("exe")  # In temp dir
+
+            # Test combined exclusion rules
+            config = ScanConfig(
+                max_depth=5,
+                exclude_patterns=["temp/**", "*.tmp"],
+                min_file_size_bytes=100,
+                exclude_extensions=[".exe"]
+            )
+
+            files = list(scanner._scan_directory_with_config(temp_path, config))
+
+            # Verify all exclusion rules work together
+            file_names = [f.path.name for f in files]
+            assert "keep.txt" in file_names         # Should be kept
+            assert "temp.log" not in file_names     # Excluded by size
+            assert "large.tmp" not in file_names    # Excluded by extension
+            assert "nested.exe" not in file_names   # Excluded by path and extension
+
+    @pytest.mark.unit
+    def test_exclusion_performance(self):
+        """Test that exclusion rules don't significantly impact performance."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner, ScanConfig
+        import tempfile
+        from pathlib import Path
+        import time
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create many files with various patterns
+            for i in range(200):
+                if i % 3 == 0:
+                    (temp_path / f"keep{i}.txt").write_text("keep")
+                elif i % 3 == 1:
+                    (temp_path / f"temp{i}.tmp").write_text("temp")
+                else:
+                    (temp_path / f"exclude{i}.exe").write_text("exe")
+
+            # Test performance with exclusion rules
+            config = ScanConfig(
+                max_depth=5,
+                exclude_patterns=["*.tmp", "*.exe"],
+                min_file_size_bytes=0
+            )
+
+            start_time = time.time()
+            files = list(scanner._scan_directory_with_config(temp_path, config))
+            end_time = time.time()
+
+            # Verify exclusions worked
+            file_names = [f.path.name for f in files]
+            assert any("keep" in name for name in file_names)
+            assert not any(".tmp" in name for name in file_names)
+            assert not any(".exe" in name for name in file_names)
+
+            # Verify performance is reasonable
+            assert (end_time - start_time) < 2.0  # Should complete in less than 2 seconds
