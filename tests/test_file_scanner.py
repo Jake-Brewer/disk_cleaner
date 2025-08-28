@@ -169,3 +169,188 @@ class TestFileSystemScanner:
 
             # Should either complete or be cancelled gracefully
             assert scan_thread.is_alive() == False  # Thread should have finished
+
+    @pytest.mark.unit
+    def test_comprehensive_file_metadata(self):
+        """Test collection of comprehensive file metadata."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner
+        import tempfile
+        from pathlib import Path
+        import time
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test files with different characteristics
+            test_file = temp_path / "test.txt"
+            test_file.write_text("test content")
+
+            # Create a hidden file (Windows-specific)
+            hidden_file = temp_path / "hidden.txt"
+            hidden_file.write_text("hidden content")
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetFileAttributesW(str(hidden_file), 2)  # FILE_ATTRIBUTE_HIDDEN
+            except (AttributeError, OSError):
+                pass  # Skip on non-Windows platforms
+
+            # Create a large file
+            large_file = temp_path / "large.txt"
+            large_content = "x" * 10000
+            large_file.write_text(large_content)
+
+            # Wait a moment to ensure different timestamps
+            time.sleep(0.1)
+
+            # Scan and collect metadata
+            files = list(scanner._scan_directory(temp_path, max_depth=5))
+
+            # Find our test files
+            test_file_info = next((f for f in files if f.path.name == "test.txt"), None)
+            hidden_file_info = next((f for f in files if f.path.name == "hidden.txt"), None)
+            large_file_info = next((f for f in files if f.path.name == "large.txt"), None)
+
+            # Verify comprehensive metadata collection
+            assert test_file_info is not None
+            assert test_file_info.size_bytes == len("test content")
+            assert test_file_info.is_directory == False
+            assert isinstance(test_file_info.modified_time, datetime)
+            assert isinstance(test_file_info.created_time, datetime)
+
+            assert large_file_info is not None
+            assert large_file_info.size_bytes == len(large_content)
+            assert large_file_info.size_bytes > 1000  # Should be large
+
+            # Verify large file handling
+            assert large_file_info.is_large_file()  # Should have this method
+
+    @pytest.mark.unit
+    def test_file_hash_seed_generation(self):
+        """Test generation of hash seeds for duplicate detection."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner
+        import tempfile
+        from pathlib import Path
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test files
+            file1 = temp_path / "file1.txt"
+            file1.write_text("content1")
+
+            file2 = temp_path / "file2.txt"
+            file2.write_text("content2")
+
+            # Scan and check hash seed generation
+            files = list(scanner._scan_directory(temp_path, max_depth=5))
+
+            file1_info = next((f for f in files if f.path.name == "file1.txt"), None)
+            file2_info = next((f for f in files if f.path.name == "file2.txt"), None)
+
+            # Verify hash seed generation
+            assert file1_info is not None
+            assert file2_info is not None
+            assert hasattr(file1_info, 'hash_seed')
+            assert hasattr(file2_info, 'hash_seed')
+            assert file1_info.hash_seed != file2_info.hash_seed  # Different files should have different seeds
+
+    @pytest.mark.unit
+    def test_windows_file_attributes(self):
+        """Test collection of Windows file attributes."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner
+        import tempfile
+        from pathlib import Path
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create test files
+            normal_file = temp_path / "normal.txt"
+            normal_file.write_text("normal")
+
+            # Create system file (if possible)
+            system_file = temp_path / "system.txt"
+            system_file.write_text("system")
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetFileAttributesW(str(system_file), 4)  # FILE_ATTRIBUTE_SYSTEM
+            except (AttributeError, OSError):
+                pass  # Skip on non-Windows platforms
+
+            # Scan and check attributes
+            files = list(scanner._scan_directory(temp_path, max_depth=5))
+
+            normal_info = next((f for f in files if f.path.name == "normal.txt"), None)
+            system_info = next((f for f in files if f.path.name == "system.txt"), None)
+
+            # Verify attribute collection
+            assert normal_info is not None
+            assert system_info is not None
+            assert hasattr(normal_info, 'attributes')
+            assert hasattr(system_info, 'attributes')
+
+    @pytest.mark.unit
+    def test_metadata_collection_performance(self):
+        """Test that metadata collection is performed efficiently."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner
+        import tempfile
+        from pathlib import Path
+        import time
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create many files for performance testing
+            for i in range(100):
+                (temp_path / f"file{i}.txt").write_text(f"content{i}")
+
+            # Time the metadata collection
+            start_time = time.time()
+            files = list(scanner._scan_directory(temp_path, max_depth=5))
+            end_time = time.time()
+
+            # Verify performance is reasonable
+            assert len(files) == 100
+            assert (end_time - start_time) < 1.0  # Should complete in less than 1 second
+
+    @pytest.mark.unit
+    def test_special_file_handling(self):
+        """Test handling of special file types (junctions, hardlinks)."""
+        from disk_cleaner.src.disk_cleaner.file_scanner import FileSystemScanner
+        import tempfile
+        from pathlib import Path
+
+        scanner = FileSystemScanner()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Create a regular file
+            regular_file = temp_path / "regular.txt"
+            regular_file.write_text("regular")
+
+            # Try to create a hardlink (if supported)
+            try:
+                hardlink_file = temp_path / "hardlink.txt"
+                hardlink_file.hardlink_to(regular_file)
+
+                # Scan and verify both files are found
+                files = list(scanner._scan_directory(temp_path, max_depth=5))
+                file_names = [f.path.name for f in files if f.path.name.endswith('.txt')]
+
+                assert "regular.txt" in file_names
+                assert "hardlink.txt" in file_names
+
+            except OSError:
+                # Hardlinks not supported or failed
+                files = list(scanner._scan_directory(temp_path, max_depth=5))
+                file_names = [f.path.name for f in files if f.path.name.endswith('.txt')]
+                assert "regular.txt" in file_names
