@@ -45,6 +45,16 @@ class ScanConfig:
     """Configuration for file system scanning."""
     max_depth: int = 10
     follow_symlinks: bool = False
+    exclude_patterns: List[str] = None
+    min_file_size_bytes: int = 0
+    exclude_extensions: List[str] = None
+
+    def __post_init__(self):
+        """Initialize mutable defaults."""
+        if self.exclude_patterns is None:
+            self.exclude_patterns = []
+        if self.exclude_extensions is None:
+            self.exclude_extensions = []
 
 
 class FileSystemScanner:
@@ -128,3 +138,49 @@ class FileSystemScanner:
         except (OSError, PermissionError):
             # Skip paths we can't access
             pass
+
+    def _scan_directory_with_config(self, path: Path, config: ScanConfig) -> Iterator[FileInfo]:
+        """Scan directory applying exclusion rules from configuration.
+
+        Args:
+            path: Root path to scan
+            config: Scan configuration with exclusion rules
+
+        Yields:
+            FileInfo objects for files that pass all exclusion filters
+        """
+        import fnmatch
+
+        for file_info in self._scan_directory(path, config.max_depth, config.follow_symlinks):
+            # Apply size-based filtering
+            if file_info.size_bytes < config.min_file_size_bytes:
+                continue
+
+            # Apply extension-based filtering
+            if config.exclude_extensions:
+                file_extension = file_info.path.suffix.lower()
+                if file_extension in [ext.lower() for ext in config.exclude_extensions]:
+                    continue
+
+            # Apply pattern-based filtering
+            if config.exclude_patterns:
+                should_exclude = False
+                for pattern in config.exclude_patterns:
+                    # Check if pattern matches file path
+                    if fnmatch.fnmatch(str(file_info.path), pattern):
+                        should_exclude = True
+                        break
+                    # Check if pattern matches relative path from scan root
+                    try:
+                        relative_path = file_info.path.relative_to(path)
+                        if fnmatch.fnmatch(str(relative_path), pattern):
+                            should_exclude = True
+                            break
+                    except ValueError:
+                        # Path is not relative to scan root, skip this check
+                        pass
+
+                if should_exclude:
+                    continue
+
+            yield file_info
